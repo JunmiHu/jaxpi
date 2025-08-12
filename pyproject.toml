@@ -8,7 +8,7 @@ requires-python = ">=3.11"
 # Core runtime (CPU) – keep lean; GPU / extras below
 dependencies = [
   "numpy==2.3.2",
-  "jax==0.7.0",          # pure CPU; choose one of cuda extras instead if on GPU
+  "jax==0.7.0", # pure CPU; choose one of cuda extras instead if on GPU
   "jaxlib==0.7.0",
   "flax==0.11.1",
   "optax==0.2.5",
@@ -32,7 +32,9 @@ dependencies = [
   "python-dateutil==2.9.0.post0",
   "pyyaml==6.0.2",
   "packaging==25.0",
-  "typing-extensions==4.14.1"
+  "typing-extensions==4.14.1",
+  "psgd-jax>=0.2.9",
+  "torch>=2.8.0",
 ]
 
 [project.optional-dependencies]
