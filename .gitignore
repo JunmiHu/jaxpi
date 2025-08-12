@@ -1,0 +1,138 @@
+############################
+# Python basics
+############################
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual environments / tooling
+.venv/
+venv/
+.env
+.env.*
+.python-version
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+wheelhouse/
+*.egg
+
+# Jupyter / IPython
+.ipynb_checkpoints/
+profile_default/
+.ipython/
+
+# Logs / profiling
+logs/
+log/
+*.log
+*.pid
+.prof/
+*.prof
+*.pstats
+
+############################
+# Project specific (JAX-PI)
+############################
+# Checkpoints (Orbax / custom)
+ckpt/
+**/ckpt/
+**/checkpoint*/
+*.ckpt
+checkpoint_*/
+checkpoint*/
+
+# Saved arrays / intermediates
+*.npz
+*.npy
+
+# Training outputs / artifacts
+*.out
+*.err
+
+# Weights & bias runs
+wandb/
+**/wandb/
+
+# Temporary experiment dirs (common pattern: run names)
+run_*/
+runs/
+
+# Figures / generated media
+figures/
+**/figures/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+
+############################
+# Cache / performance
+############################
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+.pyre/
+.__pypackages__/
+.pytype/
+.cache/
+.cache/**
+**/.cache/
+
+# JAX / XLA compilation cache (if placed locally)
+.xla_cache/
+
+############################
+# Editors / IDEs
+############################
+.vscode/
+.idea/
+*.swp
+*.swo
+*.orig
+
+############################
+# Dependency managers
+############################
+# (Keep pyproject.toml & uv.lock tracked; ignore local lock backups)
+poetry.lock
+Pipfile
+Pipfile.lock
+requirements.txt
+requirements-dev.txt
+
+############################
+# Data (protect against large accidental commits)
+############################
+data/
+**/data/
+*.mat
+*.csv
+*.h5
+*.hdf5
+*.npz
+*.pth
+*.pt
+
+############################
+# Security / keys
+############################
+*.pem
+*.key
+*.crt
+*.der
+
+############################
+# Misc
+############################
+.DS_Store
+Thumbs.db
+*.bak

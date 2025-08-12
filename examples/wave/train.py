@@ -21,6 +21,7 @@ from utils import get_dataset
 
 
 def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
+    print("Starting to try training:")
     logger = Logger()
     wandb_config = config.wandb
     wandb.init(project=wandb_config.project, name=wandb_config.name)
@@ -34,6 +35,7 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
     n_x = 128  # number of spatial points
 
     # Get  dataset
+    print("Loading dataset...")
     u_ref, t_star, x_star = get_dataset(T, L, a, c, n_t, n_x)
 
     # Initial condition
@@ -50,7 +52,7 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
 
     # Initialize residual sampler
     res_sampler = iter(UniformSampler(dom, config.training.batch_size_per_device))
-
+    print("Residual sampler initialized.")
     if config.use_pi_init:
         logger.info("Use physics-informed initialization...")
 
@@ -76,12 +78,14 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
         del model, state, params
 
     # Initialize model
+    print("Initializing model...")
     model = models.Wave(config, u0, t_star, x_star, c)
 
     evaluator = models.WaveEvaluator(config, model)
 
     # jit warm up
     print("Waiting for JIT...")
+    print("Begining training")
     for step in range(config.training.max_steps):
         start_time = time.time()
 

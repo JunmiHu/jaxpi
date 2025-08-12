@@ -5,7 +5,7 @@ from flax.training import train_state
 from flax import jax_utils
 
 import jax.numpy as jnp
-from jax import lax, jit, grad, pmap, random, tree_map, jacfwd, jacrev
+from jax import lax, jit, grad, pmap, random, jacfwd, jacrev
 from jax.tree_util import tree_map, tree_reduce, tree_leaves
 
 import optax
@@ -90,6 +90,7 @@ def _create_optimizer(config):
         )
 
     elif config.optimizer == "Soap":
+        print("Using SOAP optimizer")
 
         tx = soap(
             learning_rate=lr, b1=config.beta1, b2=config.beta2, weight_decay=0.0, precondition_frequency=2

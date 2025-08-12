@@ -10,7 +10,9 @@ from absl import flags
 from ml_collections import config_flags
 
 import jax
+jax.config.update("jax_enable_x64", True)
 jax.config.update("jax_default_matmul_precision", "highest")
+import jax.numpy as jnp
 
 import train
 import eval
@@ -37,4 +39,6 @@ def main(argv):
 
 if __name__ == "__main__":
     flags.mark_flags_as_required(["config", "workdir"])
+    print("x64 enabled?", jax.config.read("jax_enable_x64"))
+    print("probe dtype:", jnp.array(0., dtype=jnp.float64).dtype)
     app.run(main)

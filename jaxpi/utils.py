@@ -5,7 +5,7 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
-from jax import jit, grad, tree_map
+from jax import jit, grad
 from jax.tree_util import tree_map
 from jax.flatten_util import ravel_pytree
 
