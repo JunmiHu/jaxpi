@@ -12,7 +12,7 @@ def get_config():
     # Weights & Biases
     config.wandb = wandb = ml_collections.ConfigDict()
     wandb.project = "PINN-Wave"
-    wandb.name = "pirate"
+    wandb.name = "pirate_fp64"
     wandb.tag = None
 
     # Physics-informed initialization
