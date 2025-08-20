@@ -16,10 +16,14 @@ from jaxpi.utils import flatten_pytree
 from soap_jax import soap  # Install from https://github.com/haydn-jones/SOAP_JAX
 from psgd_jax.kron import kron
 
+from jaxpi.ssbroyden_optax import scale_by_ssbroyden_wolfe_oracle
+
 
 class TrainState(train_state.TrainState):
     weights: Dict
     momentum: float
+    is_ssbroyden: bool = False
+    loss_fn: Optional[Callable] = None
 
     def apply_weights(self, weights, **kwargs):
         """Updates `weights` using running average  in return value.
@@ -41,6 +45,41 @@ class TrainState(train_state.TrainState):
             opt_state=self.opt_state,
             weights=weights,
             **kwargs,
+        )
+    
+    def apply_gradients(self, *, grads, **kwargs):
+        """Apply gradients with support for extra args needed by advanced optimizers."""
+        return super().apply_gradients(grads=grads, **kwargs)
+        
+    def apply_gradients_ssbroyden(self, *, grads, **kwargs):
+        batch = kwargs['batch']
+        loss_fn = kwargs['loss_fn']
+        loss_args = kwargs.get('loss_args', ())
+        
+        # Compute current loss value
+        f_k = loss_fn(self.params, self.weights, batch, *loss_args)
+        
+        # Create fg_oracle that matches SSBroyden's expected signature
+        def fg_oracle(params, weights, batch_data, *extra_args):
+            f = loss_fn(params, weights, batch_data, *extra_args)
+            g = grad(loss_fn)(params, weights, batch_data, *extra_args)
+            return f, g
+        
+        # Use SSBroyden update
+        updates, new_opt_state = self.tx.update(
+            grads, self.opt_state, self.params,
+            f_k=f_k,
+            fg_oracle=fg_oracle,
+            loss_args=(self.weights, batch, *loss_args)
+        )
+        
+        new_params = optax.apply_updates(self.params, updates)
+        
+        return self.replace(
+            step=self.step + 1,
+            params=new_params,
+            opt_state=new_opt_state,
+            **{k: v for k, v in kwargs.items() if k not in ['batch', 'loss_fn', 'loss_args']},
         )
 
 
@@ -115,9 +154,19 @@ def _create_optimizer(config):
         tx = optax.rmsprop(
             learning_rate=lr
         )
+    
+    elif config.optimizer == "SSBroyden":
+        print("Using SSBroyden optimizer")
+        tx = scale_by_ssbroyden_wolfe_oracle(
+            lr=config.learning_rate,  # SSBroyden uses base lr, not schedule
+            c1=getattr(config, 'c1', 1e-4),
+            c2=getattr(config, 'c2', 0.9),
+            max_ls=getattr(config, 'max_ls', 20),
+            init_scale=getattr(config, 'init_scale', True)
+        )
 
-    # Gradient accumulation
-    if config.grad_accum_steps > 1:
+    # Gradient accumulation (not compatible with SSBroyden)
+    if config.grad_accum_steps > 1 and config.optimizer != "SSBroyden":
         tx = optax.MultiSteps(tx, every_k_schedule=config.grad_accum_steps)
 
     return lr, tx
@@ -137,12 +186,16 @@ def _create_train_state(config, params=None, weights=None):
     if weights is None:
         weights = dict(config.weighting.init_weights)
 
+    is_ssbroyden = config.optim.optimizer == "SSBroyden"
+    
     state = TrainState.create(
         apply_fn=arch.apply,
         params=params,
         tx=tx,
         weights=weights,
         momentum=config.weighting.momentum,
+        is_ssbroyden=is_ssbroyden,
+        loss_fn=None,  # Will be set by the PINN instance
     )
 
     return jax_utils.replicate(state)
@@ -215,11 +268,22 @@ class PINN:
         state = state.apply_weights(weights=weights)
         return state
 
-    @partial(pmap, axis_name="batch", static_broadcasted_argnums=(0,))
-    def step(self, state, batch, *args):
+    @partial(pmap, axis_name="batch", static_broadcasted_argnums=(0,3))
+    def step(self, state, batch, is_ssbroyden:bool, *args):
         grads = grad(self.loss)(state.params, state.weights, batch, *args)
         grads = lax.pmean(grads, "batch")
-        state = state.apply_gradients(grads=grads)
+        
+        # Pass additional kwargs for SSBroyden optimizer
+        apply_kwargs = {"grads": grads}
+        if is_ssbroyden:
+            apply_kwargs.update({
+                "batch": batch,
+                "loss_fn": self.loss,
+                "loss_args": args
+            })
+            state = state.apply_gradients_ssbroyden(**apply_kwargs)
+        else:
+            state = state.apply_gradients(**apply_kwargs)
         return state
 
 

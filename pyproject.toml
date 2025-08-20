@@ -10,7 +10,7 @@ dependencies = [
   "numpy==2.3.2",
   "jax==0.7.0", # pure CPU; choose one of cuda extras instead if on GPU
   "jaxlib==0.7.0",
-  "flax==0.11.1",
+  "flax==0.11",
   "optax==0.2.5",
   "chex==0.1.90",
   "ml-collections==1.1.0",
@@ -35,6 +35,8 @@ dependencies = [
   "typing-extensions==4.14.1",
   "psgd-jax>=0.2.9",
   "torch>=2.8.0",
+  "marimo>=0.14.17",
+  "ipykernel>=6.30.1",
 ]
 
 [project.optional-dependencies]

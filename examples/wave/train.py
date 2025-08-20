@@ -86,12 +86,14 @@ def train_and_evaluate(config: ml_collections.ConfigDict, workdir: str):
     # jit warm up
     print("Waiting for JIT...")
     print("Begining training")
+    is_ssbroyden = config.optim.optimizer == "SSBroyden"
+    print(f"Using SSBroyden optimizer: {is_ssbroyden}")
     for step in range(config.training.max_steps):
         start_time = time.time()
 
         batch = next(res_sampler)
 
-        model.state = model.step(model.state, batch)
+        model.state = model.step(model.state, batch, is_ssbroyden)
 
         # Update weights
         if config.weighting.scheme in ["grad_norm", "ntk"]:
