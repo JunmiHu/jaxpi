@@ -229,13 +229,13 @@ def scale_by_ssbroyden_wolfe_oracle(
             ykHkyk = jnp.vdot(y_k, Hkyk).astype(dtype)
             h_k = ykHkyk * rhok
             b_k = -alpha * rhok * jnp.vdot(s_k, g_k).astype(dtype)
-            a_k = b_k * h_k - dtype.type(1.0)
+            a_k = b_k * h_k - dtype.type(1.0) 
             sqrt_arg = jnp.abs(a_k) / (dtype.type(1.0) + a_k)
             sqrt_arg_valid = jnp.logical_and(jnp.isfinite(sqrt_arg), sqrt_arg >= 0)
             use_arg = jnp.where(sqrt_arg_valid, sqrt_arg, state["last_sqrt_arg"].astype(dtype))
             rho_k_minus = jnp.minimum(dtype.type(1.0), h_k * (dtype.type(1.0) - jnp.sqrt(jnp.abs(use_arg))))
             new_last_ok = jnp.where(sqrt_arg_valid, use_arg, state["last_sqrt_arg"].astype(dtype))
-            skip_small_rho = jnp.abs(rho_k_minus) < dtype.type(1e-8)
+            skip_small_rho = jnp.abs(rho_k_minus) < dtype.type(1e-16)
             theta_k_minus = (rho_k_minus - dtype.type(1.0)) / a_k
             theta_k_plus = dtype.type(1.0) / rho_k_minus
             theta_k = jnp.maximum(theta_k_minus, jnp.minimum(theta_k_plus, (dtype.type(1.0) - b_k) / b_k))
