@@ -47,10 +47,10 @@ class _Pack:
         self.n = flat.size
     def ravel_params(self, params) -> jnp.ndarray:
         flat, _ = ravel_pytree(params)
-        return flat
+        return flat.astype(jnp.float64)  # Force float64
     def ravel_grads(self, grads) -> jnp.ndarray:
         flat, _ = ravel_pytree(grads)
-        return flat
+        return flat.astype(jnp.float64)  # Force float64
     def unravel_vec(self, vec):
         return self.unravel(vec)
 
@@ -82,21 +82,21 @@ def scale_by_ssbroyden_wolfe_oracle(
     """
 
     def init_fn(params):
-        leaves = jax.tree.leaves(params)
-        p_dtype = leaves[0].dtype if len(leaves) else jnp.float64
+        # ALWAYS use float64 regardless of input parameter dtype
         pack0 = _Pack(params)
-        H0 = jnp.eye(pack0.n, dtype=p_dtype)
-        return {"H": H0, "last_sqrt_arg": jnp.array(0.5, dtype=p_dtype), "did_scale": jnp.array(False)}
+        H0 = jnp.eye(pack0.n, dtype=jnp.float64)
+        return {"H": H0, "last_sqrt_arg": jnp.array(0.5, dtype=jnp.float64), "did_scale": jnp.array(False)}
 
     def _oracle_flat(fg_oracle, pack: _Pack, x, loss_args, dtype):
-        # Call user's oracle on a params-like PyTree; return (f, g_flat) in dtype
+        # Call user's oracle on a params-like PyTree; return (f, g_flat) in float64
         params_x = pack.unravel_vec(x)
         f, gtree = fg_oracle(params_x, *loss_args)
         g_flat = pack.ravel_grads(gtree)
-        return jnp.asarray(f, dtype), g_flat.astype(dtype)
+        return jnp.asarray(f, jnp.float64), g_flat.astype(jnp.float64)
 
     def _wolfe_oracle(xk, fk, gk, pk, gk_dot_pk, *, fg_oracle, pack, loss_args, lr, c1, c2, max_ls, alpha_min = 1e-32, alpha_max =1e6, shrink =0.5, grow = 1.1):
-        dtype = xk.dtype
+        # Force float64 for all computations
+        dtype = jnp.float64
         alpha0   = jnp.asarray(lr, dtype)
         c1_      = jnp.asarray(c1, dtype)
         c2_      = jnp.asarray(c2, dtype)
@@ -180,30 +180,33 @@ def scale_by_ssbroyden_wolfe_oracle(
     def update_fn(grads, state, params, *, f_k, fg_oracle, loss_args=()):
         pack = _Pack(params)
         x_k = pack.ravel_params(params)
-        dtype = x_k.dtype
+        dtype = jnp.float64  # Force float64
         # g_k comes from caller (outside value_and_grad)
         g_k = pack.ravel_grads(grads).astype(dtype)
         f_k = jnp.asarray(f_k, dtype)
+
+        # Ensure x_k is also float64
+        x_k = x_k.astype(dtype)
 
         # One-time H scaling
         def _maybe_scale_H(H, gk, did_scale_flag):
             def yes(_):
                 gnorm = jnp.linalg.norm(gk)
-                tau0 = jnp.maximum(gnorm, jnp.asarray(1e-12, dtype))
+                tau0 = jnp.maximum(gnorm, jnp.asarray(1e-12, jnp.float64))
                 return H / tau0, jnp.array(True)
             def no(_):
                 return H, did_scale_flag
             return jax.lax.cond(jnp.logical_and(jnp.logical_not(did_scale_flag), jnp.array(init_scale)),
                                 yes, no, operand=None)
 
-        H = state["H"].astype(dtype)
+        H = state["H"].astype(jnp.float64)
         H, did_scale = _maybe_scale_H(H, g_k, state.get("did_scale", jnp.array(False)))
 
         # Direction and fallback
         pk_raw = -(H @ g_k)
-        dot_pg = jnp.vdot(pk_raw, g_k).astype(dtype)
+        dot_pg = jnp.vdot(pk_raw, g_k).astype(jnp.float64)
         pk = jax.lax.cond(dot_pg >= 0, lambda _: -g_k, lambda _: pk_raw, operand=None)
-        gk_dot_pk = jnp.vdot(g_k, pk).astype(dtype)
+        gk_dot_pk = jnp.vdot(g_k, pk).astype(jnp.float64)
 
         # Strong-Wolfe, using the caller-provided oracle for (f,g)
         alpha, f_new, g_new = _wolfe_oracle(
@@ -216,45 +219,49 @@ def scale_by_ssbroyden_wolfe_oracle(
         x_new = x_k + alpha * pk
         s_k = x_new - x_k
         y_k = g_new - g_k
-        rhok_inv = jnp.vdot(y_k, s_k).astype(dtype)
-        eps = jnp.asarray(1e-32, dtype)
+        rhok_inv = jnp.vdot(y_k, s_k).astype(jnp.float64)
+        eps = jnp.asarray(1e-32, jnp.float64)
         small_curv = jnp.abs(rhok_inv) < eps
 
         n = x_k.shape[0]
-        n_f = jnp.asarray(n, dtype)
+        n_f = jnp.asarray(n, jnp.float64)
 
         def do_update(_):
             rhok = 1.0 / rhok_inv
             Hkyk = H @ y_k
-            ykHkyk = jnp.vdot(y_k, Hkyk).astype(dtype)
+            ykHkyk = jnp.vdot(y_k, Hkyk).astype(jnp.float64)
             h_k = ykHkyk * rhok
-            b_k = -alpha * rhok * jnp.vdot(s_k, g_k).astype(dtype)
-            a_k = b_k * h_k - dtype.type(1.0) 
-            sqrt_arg = jnp.abs(a_k) / (dtype.type(1.0) + a_k)
+            b_k = -alpha * rhok * jnp.vdot(s_k, g_k).astype(jnp.float64)
+            # Use explicit float64 constants instead of dtype.type()
+            one = jnp.asarray(1.0, jnp.float64)
+            eps_16 = jnp.asarray(1e-16, jnp.float64)
+
+            a_k = b_k * h_k - one
+            sqrt_arg = jnp.abs(a_k) / (one + a_k)
             sqrt_arg_valid = jnp.logical_and(jnp.isfinite(sqrt_arg), sqrt_arg >= 0)
-            use_arg = jnp.where(sqrt_arg_valid, sqrt_arg, state["last_sqrt_arg"].astype(dtype))
-            rho_k_minus = jnp.minimum(dtype.type(1.0), h_k * (dtype.type(1.0) - jnp.sqrt(jnp.abs(use_arg))))
-            new_last_ok = jnp.where(sqrt_arg_valid, use_arg, state["last_sqrt_arg"].astype(dtype))
-            skip_small_rho = jnp.abs(rho_k_minus) < dtype.type(1e-16)
-            theta_k_minus = (rho_k_minus - dtype.type(1.0)) / a_k
-            theta_k_plus = dtype.type(1.0) / rho_k_minus
-            theta_k = jnp.maximum(theta_k_minus, jnp.minimum(theta_k_plus, (dtype.type(1.0) - b_k) / b_k))
-            rho_k_cap = jnp.minimum(dtype.type(1.0), dtype.type(1.0) / b_k)
-            sigma_k = dtype.type(1.0) + theta_k * a_k
-            power = dtype.type(1.0) / (dtype.type(1.0) - n_f)
+            use_arg = jnp.where(sqrt_arg_valid, sqrt_arg, state["last_sqrt_arg"].astype(jnp.float64))
+            rho_k_minus = jnp.minimum(one, h_k * (one - jnp.sqrt(jnp.abs(use_arg))))
+            new_last_ok = jnp.where(sqrt_arg_valid, use_arg, state["last_sqrt_arg"].astype(jnp.float64))
+            skip_small_rho = jnp.abs(rho_k_minus) < eps_16
+            theta_k_minus = (rho_k_minus - one) / a_k
+            theta_k_plus = one / rho_k_minus
+            theta_k = jnp.maximum(theta_k_minus, jnp.minimum(theta_k_plus, (one - b_k) / b_k))
+            rho_k_cap = jnp.minimum(one, one / b_k)
+            sigma_k = one + theta_k * a_k
+            power = one / (one - n_f)
             sigma_pow = jnp.abs(sigma_k) ** power
             tau_k = jnp.where(theta_k <= 0.0,
                               jnp.minimum(rho_k_cap * sigma_pow, sigma_k),
-                              rho_k_cap * jnp.minimum(sigma_pow, dtype.type(1.0) / theta_k))
+                              rho_k_cap * jnp.minimum(sigma_pow, one / theta_k))
             v_k = rhok * s_k - Hkyk / ykHkyk
-            phi_k = (dtype.type(1.0) - theta_k) / (dtype.type(1.0) + a_k * theta_k)
+            phi_k = (one - theta_k) / (one + a_k * theta_k)
             H_cand = (H - jnp.outer(Hkyk, Hkyk) / ykHkyk + phi_k * ykHkyk * jnp.outer(v_k, v_k)) / tau_k \
                      + rhok * jnp.outer(s_k, s_k)
             H_new = jnp.where(skip_small_rho, H, H_cand)
             return H_new, new_last_ok
 
         H_new, last_ok = jax.lax.cond(small_curv,
-                                      lambda _: (H, state["last_sqrt_arg"].astype(dtype)),
+                                      lambda _: (H, state["last_sqrt_arg"].astype(jnp.float64)),
                                       do_update,
                                       operand=None)
 
