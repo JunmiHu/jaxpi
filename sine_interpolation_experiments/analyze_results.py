@@ -316,7 +316,7 @@ def plot_results(df: pd.DataFrame, output_dir: str = None):
         plt.savefig(output_path / 'architecture_size_distribution.png', dpi=300, bbox_inches='tight')
     plt.show()
 
-    # 5. Parameter count vs performance
+    # 5. Parameter count vs performance (loglog with power law fit)
     if 'param_count' in df.columns and df['param_count'].notna().any():
         fig, ax = plt.subplots(figsize=(10, 6))
 
@@ -326,24 +326,61 @@ def plot_results(df: pd.DataFrame, output_dir: str = None):
             'param_count': 'first'  # param count is the same for all runs of same architecture
         }).reset_index()
 
-        # Create scatter plot
-        scatter = ax.scatter(arch_performance['param_count'], arch_performance['final_rel_l2'],
-                           alpha=0.7, s=60, c=arch_performance['width'], cmap='viridis')
+        # Filter out any zero or negative values for log scale
+        valid_data = arch_performance[(arch_performance['param_count'] > 0) &
+                                    (arch_performance['final_rel_l2'] > 0)].copy()
 
-        # Add colorbar
-        cbar = plt.colorbar(scatter, ax=ax)
-        cbar.set_label('Width')
+        if len(valid_data) >= 2:  # Need at least 2 points for a fit
+            # Create scatter plot
+            scatter = ax.scatter(valid_data['param_count'], valid_data['final_rel_l2'],
+                               alpha=0.7, s=60, c=valid_data['width'], cmap='viridis', zorder=3)
 
-        # Add labels for each point
-        for _, row in arch_performance.iterrows():
-            ax.annotate(f"w={int(row['width'])},d={int(row['depth'])}",
-                       (row['param_count'], row['final_rel_l2']),
-                       xytext=(5, 5), textcoords='offset points', fontsize=8, alpha=0.8)
+            # Add colorbar
+            cbar = plt.colorbar(scatter, ax=ax)
+            cbar.set_label('Width')
+
+            # Fit power law: error = A * params^B
+            # Taking log: log(error) = log(A) + B * log(params)
+            log_params = np.log(valid_data['param_count'])
+            log_error = np.log(valid_data['final_rel_l2'])
+
+            # Linear fit in log space
+            coeffs = np.polyfit(log_params, log_error, 1)
+            slope, intercept = coeffs
+            A = np.exp(intercept)  # Convert back from log space
+            B = slope
+
+            # Create fit line
+            param_range = np.logspace(np.log10(valid_data['param_count'].min()),
+                                    np.log10(valid_data['param_count'].max()), 100)
+            fit_line = A * (param_range ** B)
+
+            ax.plot(param_range, fit_line, 'r--', alpha=0.8, linewidth=2, zorder=2,
+                   label=f'Power law fit: error ∝ params^{B:.2f}')
+
+            # Add labels for each point
+            for _, row in valid_data.iterrows():
+                ax.annotate(f"w={int(row['width'])},d={int(row['depth'])}",
+                           (row['param_count'], row['final_rel_l2']),
+                           xytext=(5, 5), textcoords='offset points', fontsize=8, alpha=0.8)
+
+            # Calculate R-squared
+            y_pred = A * (valid_data['param_count'] ** B)
+            ss_res = np.sum((valid_data['final_rel_l2'] - y_pred) ** 2)
+            ss_tot = np.sum((valid_data['final_rel_l2'] - valid_data['final_rel_l2'].mean()) ** 2)
+            r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+
+            ax.text(0.05, 0.95, f'Power law: error = {A:.2e} × params^{B:.2f}\nR² = {r_squared:.3f}',
+                   transform=ax.transAxes, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+                   verticalalignment='top', fontsize=10)
+
+            ax.legend()
 
         ax.set_xlabel('Parameter Count')
         ax.set_ylabel('Median Relative L2 Error')
+        ax.set_xscale('log')
         ax.set_yscale('log')
-        ax.set_title('Performance vs Model Size')
+        ax.set_title('Performance vs Model Size (Power Law Scaling)')
         ax.grid(True, alpha=0.3)
 
         if output_dir:
