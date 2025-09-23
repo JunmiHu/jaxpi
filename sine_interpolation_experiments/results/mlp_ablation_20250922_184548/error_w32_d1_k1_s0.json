@@ -1,0 +1,10 @@
+{
+  "config": {
+    "width": 32,
+    "depth": 1,
+    "k": 1,
+    "seed": 0
+  },
+  "error": "SSBroyden optimizer not available. Please check jaxpi installation.",
+  "experiment_count": 1
+}

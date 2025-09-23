@@ -1,0 +1,10 @@
+{
+  "config": {
+    "width": 32,
+    "depth": 1,
+    "k": 1,
+    "seed": 0
+  },
+  "error": "Optimizer.update() takes 2 positional arguments but 3 were given",
+  "experiment_count": 1
+}
