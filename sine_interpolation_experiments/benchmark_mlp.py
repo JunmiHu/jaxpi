@@ -124,7 +124,7 @@ def main():
     # Architecture parameters
     parser.add_argument("--widths", nargs="+", type=int, default=[16, 32, 64, 128],
                         help="MLP widths to test")
-    parser.add_argument("--depths", nargs="+", type=int, default=[1, 2, 3, 4, 5],
+    parser.add_argument("--depths", nargs="+", type=int, default=[1, 2, 3, 4],
                         help="MLP depths to test")
     parser.add_argument("--ks", nargs="+", type=int, default=[1, 2, 4, 8, 16, 32],
                         help="k values for sin(2πkx)")

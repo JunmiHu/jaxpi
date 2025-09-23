@@ -97,6 +97,7 @@ def train_mlp_ssbroyden(
     # Training loop
     loss_history = []
     rel_l2_history = []
+    iteration_history = []
 
     pbar = tqdm(range(steps), desc="Training MLP with SSBroyden")
     initial_error = rel_l2_error(model, x_eval, y_eval)
@@ -109,6 +110,7 @@ def train_mlp_ssbroyden(
             eval_error = rel_l2_error(model, x_eval, y_eval)
             loss_history.append(float(loss))
             rel_l2_history.append(float(eval_error))
+            iteration_history.append(i)
             pbar.set_description(f"step {i}, train loss={loss:.3e}, eval rel L2={eval_error:.3e}")
 
     # Final evaluation
@@ -116,10 +118,12 @@ def train_mlp_ssbroyden(
     final_error = float(rel_l2_error(model, x_eval, y_eval))
     loss_history.append(final_loss)
     rel_l2_history.append(final_error)
+    iteration_history.append(steps)
 
     return {
         'loss_history': loss_history,
         'rel_l2_history': rel_l2_history,
+        'iteration_history': iteration_history,
         'final_loss': final_loss,
         'final_rel_l2': final_error,
         'initial_rel_l2': float(initial_error)
