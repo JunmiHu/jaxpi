@@ -544,6 +544,17 @@ def plot_representation_comparisons(df: pd.DataFrame, output_dir: str = None):
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
+    # Filter for no-MLP cases (MLP width = 0) if that column exists
+    if 'mlp_width' in df.columns:
+        no_mlp_df = df[df['mlp_width'] == 0]
+        if len(no_mlp_df) > 0:
+            print(f"Filtering for no-MLP cases: {len(no_mlp_df)} experiments (MLP width = 0)")
+            df = no_mlp_df
+        else:
+            print("No experiments found with MLP width = 0")
+    else:
+        print("Note: MLP width column not found - analyzing all experiments")
+
     # Check if we have multiple representations to compare
     representations = df['rational_representation'].unique()
     if len(representations) <= 1:
@@ -552,6 +563,13 @@ def plot_representation_comparisons(df: pd.DataFrame, output_dir: str = None):
         return
 
     print(f"Comparing representations: {list(representations)}")
+
+    # Focus on linear vs standard comparison if both are present
+    if 'linear' in representations and 'standard' in representations:
+        print("Found both linear and standard representations - focusing comparison on these two")
+        df_focused = df[df['rational_representation'].isin(['linear', 'standard'])]
+        plot_linear_vs_standard_comparison(df_focused, output_dir)
+        return
 
     # Set style for comparison plots
     plt.style.use('default')
@@ -753,6 +771,186 @@ def plot_representation_comparisons(df: pd.DataFrame, output_dir: str = None):
 
     # 4. Training curves comparison (if available)
     plot_representation_training_curves(df, representations, output_dir)
+
+
+def plot_linear_vs_standard_comparison(df: pd.DataFrame, output_dir: str = None):
+    """Specialized comparison plots for linear vs standard representations (no MLPs)."""
+    if output_dir:
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+    print("\n=== LINEAR vs STANDARD COMPARISON (No MLPs) ===")
+
+    # Separate the data
+    linear_df = df[df['rational_representation'] == 'linear']
+    standard_df = df[df['rational_representation'] == 'standard']
+
+    print(f"Linear experiments: {len(linear_df)}")
+    print(f"Standard experiments: {len(standard_df)}")
+
+    # 1. Side-by-side performance comparison
+    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+
+    # Performance by N
+    for repr_type, color in zip(['linear', 'standard'], ['blue', 'red']):
+        subset = df[df['rational_representation'] == repr_type]
+        n_perf = subset.groupby('N')['final_rel_l2'].agg(['median', 'std']).reset_index()
+        axes[0, 0].errorbar(n_perf['N'], n_perf['median'], yerr=n_perf['std'],
+                           marker='o', label=repr_type, color=color, capsize=5, linewidth=2)
+    axes[0, 0].set_xlabel('N (Number of Nodes)')
+    axes[0, 0].set_ylabel('Median Final Rel L2 Error')
+    axes[0, 0].set_yscale('log')
+    axes[0, 0].set_title('Performance by N Value')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+
+    # Performance by k
+    for repr_type, color in zip(['linear', 'standard'], ['blue', 'red']):
+        subset = df[df['rational_representation'] == repr_type]
+        k_perf = subset.groupby('k')['final_rel_l2'].agg(['median', 'std']).reset_index()
+        axes[0, 1].errorbar(k_perf['k'], k_perf['median'], yerr=k_perf['std'],
+                           marker='o', label=repr_type, color=color, capsize=5, linewidth=2)
+    axes[0, 1].set_xlabel('k (Frequency)')
+    axes[0, 1].set_ylabel('Median Final Rel L2 Error')
+    axes[0, 1].set_yscale('log')
+    axes[0, 1].set_title('Performance by Frequency k')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
+
+    # Parameter efficiency (performance vs parameter count)
+    if 'param_count' in df.columns and df['param_count'].notna().any():
+        for repr_type, color in zip(['linear', 'standard'], ['blue', 'red']):
+            subset = df[df['rational_representation'] == repr_type]
+            axes[0, 2].scatter(subset['param_count'], subset['final_rel_l2'],
+                             label=repr_type, alpha=0.7, s=60, color=color)
+        axes[0, 2].set_xlabel('Parameter Count')
+        axes[0, 2].set_ylabel('Final Rel L2 Error')
+        axes[0, 2].set_xscale('log')
+        axes[0, 2].set_yscale('log')
+        axes[0, 2].set_title('Parameter Efficiency')
+        axes[0, 2].legend()
+        axes[0, 2].grid(True, alpha=0.3)
+
+    # Direct comparison boxplot
+    sns.boxplot(data=df, x='rational_representation', y='final_rel_l2', ax=axes[1, 0])
+    axes[1, 0].set_yscale('log')
+    axes[1, 0].set_title('Performance Distribution Comparison')
+    axes[1, 0].set_ylabel('Final Rel L2 Error')
+
+    # Head-to-head scatter plot for matched configurations
+    config_columns = ['N', 'k', 'seed']
+    common_configs = df.groupby(config_columns)['rational_representation'].nunique()
+    matched_configs = common_configs[common_configs == 2].index  # Both representations present
+
+    if len(matched_configs) > 0:
+        h2h_data = []
+        for config in matched_configs:
+            n, k, seed = config
+            config_data = df[(df['N'] == n) & (df['k'] == k) & (df['seed'] == seed)]
+
+            linear_result = config_data[config_data['rational_representation'] == 'linear']
+            standard_result = config_data[config_data['rational_representation'] == 'standard']
+
+            if len(linear_result) > 0 and len(standard_result) > 0:
+                h2h_data.append({
+                    'N': n, 'k': k, 'seed': seed,
+                    'linear_rel_l2': linear_result.iloc[0]['final_rel_l2'],
+                    'standard_rel_l2': standard_result.iloc[0]['final_rel_l2']
+                })
+
+        if h2h_data:
+            h2h_df = pd.DataFrame(h2h_data)
+            axes[1, 1].scatter(h2h_df['standard_rel_l2'], h2h_df['linear_rel_l2'], alpha=0.7, s=60)
+
+            # Add diagonal line for equal performance
+            min_val = min(h2h_df['standard_rel_l2'].min(), h2h_df['linear_rel_l2'].min())
+            max_val = max(h2h_df['standard_rel_l2'].max(), h2h_df['linear_rel_l2'].max())
+            axes[1, 1].plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.5)
+
+            axes[1, 1].set_xlabel('Standard Rel L2 Error')
+            axes[1, 1].set_ylabel('Linear Rel L2 Error')
+            axes[1, 1].set_xscale('log')
+            axes[1, 1].set_yscale('log')
+            axes[1, 1].set_title('Head-to-Head Comparison')
+            axes[1, 1].grid(True, alpha=0.3)
+
+            # Count wins
+            linear_wins = (h2h_df['linear_rel_l2'] < h2h_df['standard_rel_l2']).sum()
+            standard_wins = (h2h_df['standard_rel_l2'] < h2h_df['linear_rel_l2']).sum()
+            ties = (h2h_df['linear_rel_l2'] == h2h_df['standard_rel_l2']).sum()
+
+            axes[1, 1].text(0.05, 0.95, f'Linear wins: {linear_wins}\nStandard wins: {standard_wins}\nTies: {ties}',
+                           transform=axes[1, 1].transAxes, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+                           verticalalignment='top', fontsize=10)
+
+    # Performance improvement ratio
+    if len(matched_configs) > 0 and h2h_data:
+        h2h_df['improvement_ratio'] = h2h_df['standard_rel_l2'] / h2h_df['linear_rel_l2']
+        improvement_by_n = h2h_df.groupby('N')['improvement_ratio'].agg(['median', 'std']).reset_index()
+
+        axes[1, 2].errorbar(improvement_by_n['N'], improvement_by_n['median'],
+                           yerr=improvement_by_n['std'], marker='o', capsize=5)
+        axes[1, 2].axhline(y=1, color='r', linestyle='--', alpha=0.5, label='Equal performance')
+        axes[1, 2].set_xlabel('N (Number of Nodes)')
+        axes[1, 2].set_ylabel('Improvement Ratio (Standard/Linear)')
+        axes[1, 2].set_yscale('log')
+        axes[1, 2].set_title('Linear Improvement vs Standard')
+        axes[1, 2].legend()
+        axes[1, 2].grid(True, alpha=0.3)
+
+        # Add text showing geometric mean improvement
+        geo_mean_improvement = np.exp(np.mean(np.log(h2h_df['improvement_ratio'])))
+        axes[1, 2].text(0.05, 0.95, f'Geometric mean improvement: {geo_mean_improvement:.2f}×',
+                       transform=axes[1, 2].transAxes, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+                       verticalalignment='top', fontsize=10)
+
+    plt.tight_layout()
+    if output_dir:
+        plt.savefig(output_path / 'linear_vs_standard_comparison.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # 2. Statistical summary comparison
+    print("\n=== STATISTICAL COMPARISON ===")
+    for repr_type in ['standard', 'linear']:
+        subset = df[df['rational_representation'] == repr_type]
+        if len(subset) > 0:
+            print(f"\n{repr_type.upper()} (No MLP):")
+            print(f"  Experiments: {len(subset)}")
+            print(f"  Best rel L2: {subset['final_rel_l2'].min():.6e}")
+            print(f"  Median rel L2: {subset['final_rel_l2'].median():.6e}")
+            print(f"  Mean rel L2: {subset['final_rel_l2'].mean():.6e}")
+            print(f"  Geometric mean rel L2: {np.exp(np.mean(np.log(subset['final_rel_l2']))):.6e}")
+            print(f"  Std rel L2: {subset['final_rel_l2'].std():.6e}")
+            if 'param_count' in subset.columns:
+                print(f"  Parameter count range: {subset['param_count'].min()}-{subset['param_count'].max()}")
+                print(f"  Typical parameter count: {subset['param_count'].median():.0f}")
+
+    # 3. Performance advantage analysis
+    if len(matched_configs) > 0 and h2h_data:
+        print(f"\n=== HEAD-TO-HEAD RESULTS ({len(h2h_data)} matched configurations) ===")
+        h2h_df = pd.DataFrame(h2h_data)
+
+        better_cases = h2h_df['linear_rel_l2'] < h2h_df['standard_rel_l2']
+        linear_better_count = better_cases.sum()
+        standard_better_count = (~better_cases).sum()
+
+        print(f"Linear better: {linear_better_count}/{len(h2h_data)} cases ({100*linear_better_count/len(h2h_data):.1f}%)")
+        print(f"Standard better: {standard_better_count}/{len(h2h_data)} cases ({100*standard_better_count/len(h2h_data):.1f}%)")
+
+        if linear_better_count > 0:
+            avg_linear_advantage = np.mean(h2h_df.loc[better_cases, 'standard_rel_l2'] / h2h_df.loc[better_cases, 'linear_rel_l2'])
+            print(f"When linear is better, average advantage: {avg_linear_advantage:.2f}×")
+
+        if standard_better_count > 0:
+            worse_cases = ~better_cases
+            avg_standard_advantage = np.mean(h2h_df.loc[worse_cases, 'linear_rel_l2'] / h2h_df.loc[worse_cases, 'standard_rel_l2'])
+            print(f"When standard is better, average advantage: {avg_standard_advantage:.2f}×")
+
+        # Show specific cases
+        print(f"\nDetailed head-to-head results:")
+        h2h_display = h2h_df.copy()
+        h2h_display['linear_advantage'] = h2h_display['standard_rel_l2'] / h2h_display['linear_rel_l2']
+        print(h2h_display[['N', 'k', 'seed', 'standard_rel_l2', 'linear_rel_l2', 'linear_advantage']].to_string(index=False, float_format='%.2e'))
 
 
 def plot_representation_training_curves(df: pd.DataFrame, representations: List[str], output_dir: str = None):
