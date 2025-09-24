@@ -404,30 +404,47 @@ def plot_results_single_config(df: pd.DataFrame, output_dir: str = None, config_
     sns.set_palette("husl")
 
     # 1. Heatmap of final rel L2 error by N and rational representation for different k values
-    fig, axes = plt.subplots(1, min(len(df['k'].unique()), 3), figsize=(15, 6))
-    if len(df['k'].unique()) == 1:
+    k_values = sorted(df['k'].unique())
+    n_k_values = len(k_values)
+
+    # Dynamic grid: 3 columns, enough rows to fit all k values
+    n_cols = 3
+    n_rows = (n_k_values + n_cols - 1) // n_cols  # Ceiling division
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
+
+    # Handle case where there's only one subplot
+    if n_rows == 1 and n_cols == 1:
         axes = [axes]
+    elif n_rows == 1 or n_cols == 1:
+        axes = axes.flatten()
+    else:
+        axes = axes.flatten()
 
     # Use median over seeds for each configuration
     df_median = df.groupby(['N', 'rational_representation', 'k'])['final_rel_l2'].median().reset_index()
 
-    k_values = sorted(df['k'].unique())
-    for i, k in enumerate(k_values[:3]):  # Show first 3 k values
+    for i, k in enumerate(k_values):
         subset = df_median[df_median['k'] == k]
         if len(subset) == 0:
+            # Hide empty subplot
+            axes[i].set_visible(False)
             continue
 
         pivot = subset.pivot(index='rational_representation', columns='N', values='final_rel_l2')
 
-        ax = axes[i] if len(axes) > 1 else axes[0]
         sns.heatmap(pivot, annot=True, fmt='.2e', cmap='viridis_r',
-                   ax=ax, cbar_kws={'label': 'Median Rel L2 Error'})
+                   ax=axes[i], cbar_kws={'label': 'Median Rel L2 Error'})
         title = f'Median Rel L2 Error (k={k})'
         if config_name:
             title += f' - {config_name}'
-        ax.set_title(title)
-        ax.set_xlabel('N (Number of Nodes)')
-        ax.set_ylabel('Rational Representation')
+        axes[i].set_title(title)
+        axes[i].set_xlabel('N (Number of Nodes)')
+        axes[i].set_ylabel('Rational Representation')
+
+    # Hide any unused subplots
+    for j in range(n_k_values, len(axes)):
+        axes[j].set_visible(False)
 
     plt.tight_layout()
     if output_dir:
