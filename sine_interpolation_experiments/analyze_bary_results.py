@@ -534,6 +534,241 @@ def plot_results(df: pd.DataFrame, output_dir: str = None):
         plt.savefig(output_path / 'bary_scaled_parameters_effect.png', dpi=300, bbox_inches='tight')
     plt.show()
 
+    # 7. Rational representation comparison plots
+    plot_representation_comparisons(df, output_dir)
+
+
+def plot_representation_comparisons(df: pd.DataFrame, output_dir: str = None):
+    """Create comparison plots between different rational representations."""
+    if output_dir:
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
+    # Check if we have multiple representations to compare
+    representations = df['rational_representation'].unique()
+    if len(representations) <= 1:
+        print(f"Only found {len(representations)} representation(s): {representations}")
+        print("Skipping representation comparison plots")
+        return
+
+    print(f"Comparing representations: {list(representations)}")
+
+    # Set style for comparison plots
+    plt.style.use('default')
+    colors = plt.cm.Set1(np.linspace(0, 1, len(representations)))
+
+    # 1. Performance comparison boxplots
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+
+    # Overall performance comparison
+    sns.boxplot(data=df, x='rational_representation', y='final_rel_l2', ax=axes[0, 0])
+    axes[0, 0].set_yscale('log')
+    axes[0, 0].set_title('Performance Comparison by Representation')
+    axes[0, 0].set_xlabel('Rational Representation')
+    axes[0, 0].set_ylabel('Final Rel L2 Error')
+    axes[0, 0].tick_params(axis='x', rotation=45)
+
+    # Parameter count vs performance scatter
+    if 'param_count' in df.columns and df['param_count'].notna().any():
+        for i, repr_type in enumerate(representations):
+            subset = df[df['rational_representation'] == repr_type]
+            axes[0, 1].scatter(subset['param_count'], subset['final_rel_l2'],
+                             label=repr_type, alpha=0.7, s=60, color=colors[i])
+        axes[0, 1].set_xlabel('Parameter Count')
+        axes[0, 1].set_ylabel('Final Rel L2 Error')
+        axes[0, 1].set_xscale('log')
+        axes[0, 1].set_yscale('log')
+        axes[0, 1].set_title('Parameter Count vs Performance')
+        axes[0, 1].legend()
+        axes[0, 1].grid(True, alpha=0.3)
+
+    # Performance by N value
+    for i, repr_type in enumerate(representations):
+        subset = df[df['rational_representation'] == repr_type]
+        if len(subset) > 0:
+            n_perf = subset.groupby('N')['final_rel_l2'].median()
+            axes[1, 0].plot(n_perf.index, n_perf.values, marker='o',
+                           label=repr_type, color=colors[i], linewidth=2)
+    axes[1, 0].set_xlabel('N (Number of Nodes)')
+    axes[1, 0].set_ylabel('Median Final Rel L2 Error')
+    axes[1, 0].set_yscale('log')
+    axes[1, 0].set_title('Performance by N Value')
+    axes[1, 0].legend()
+    axes[1, 0].grid(True, alpha=0.3)
+
+    # Performance by k value
+    for i, repr_type in enumerate(representations):
+        subset = df[df['rational_representation'] == repr_type]
+        if len(subset) > 0:
+            k_perf = subset.groupby('k')['final_rel_l2'].median()
+            axes[1, 1].plot(k_perf.index, k_perf.values, marker='o',
+                           label=repr_type, color=colors[i], linewidth=2)
+    axes[1, 1].set_xlabel('k (Frequency)')
+    axes[1, 1].set_ylabel('Median Final Rel L2 Error')
+    axes[1, 1].set_yscale('log')
+    axes[1, 1].set_title('Performance by Frequency k')
+    axes[1, 1].legend()
+    axes[1, 1].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    if output_dir:
+        plt.savefig(output_path / 'representation_comparison_overview.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # 2. Statistical comparison heatmap
+    fig, ax = plt.subplots(figsize=(12, 8))
+
+    # Create summary statistics for each representation
+    stats_data = []
+    for repr_type in representations:
+        subset = df[df['rational_representation'] == repr_type]
+        if len(subset) > 0:
+            stats = {
+                'representation': repr_type,
+                'count': len(subset),
+                'best_rel_l2': subset['final_rel_l2'].min(),
+                'median_rel_l2': subset['final_rel_l2'].median(),
+                'mean_rel_l2': subset['final_rel_l2'].mean(),
+                'std_rel_l2': subset['final_rel_l2'].std(),
+                'worst_rel_l2': subset['final_rel_l2'].max(),
+                'param_count_typical': subset['param_count'].median() if 'param_count' in subset.columns else None
+            }
+            stats_data.append(stats)
+
+    stats_df = pd.DataFrame(stats_data)
+
+    # Create a heatmap of log10(rel_l2) values for better visualization
+    heatmap_data = stats_df[['best_rel_l2', 'median_rel_l2', 'mean_rel_l2', 'worst_rel_l2']].copy()
+    heatmap_data = heatmap_data.apply(lambda x: np.log10(x))
+    heatmap_data.index = stats_df['representation']
+
+    sns.heatmap(heatmap_data, annot=True, fmt='.2f', cmap='viridis_r',
+               ax=ax, cbar_kws={'label': 'log10(Rel L2 Error)'})
+    ax.set_title('Performance Statistics Comparison (log10 scale)')
+    ax.set_xlabel('Statistics')
+    ax.set_ylabel('Representation')
+
+    plt.tight_layout()
+    if output_dir:
+        plt.savefig(output_path / 'representation_stats_heatmap.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # 3. Head-to-head comparison for matched configurations
+    print("\n=== HEAD-TO-HEAD COMPARISON ===")
+
+    # Find configurations that exist for multiple representations
+    config_columns = ['N', 'k', 'seed']
+    common_configs = df.groupby(config_columns)['rational_representation'].nunique()
+    common_configs = common_configs[common_configs > 1].index
+
+    if len(common_configs) > 0:
+        print(f"Found {len(common_configs)} configurations with multiple representations")
+
+        # Create head-to-head comparison data
+        h2h_data = []
+        for config in common_configs:
+            n, k, seed = config
+            config_data = df[(df['N'] == n) & (df['k'] == k) & (df['seed'] == seed)]
+
+            row = {'N': n, 'k': k, 'seed': seed}
+            for _, result in config_data.iterrows():
+                repr_type = result['rational_representation']
+                row[f'{repr_type}_rel_l2'] = result['final_rel_l2']
+                row[f'{repr_type}_params'] = result.get('param_count', None)
+            h2h_data.append(row)
+
+        h2h_df = pd.DataFrame(h2h_data)
+
+        # Plot head-to-head comparison
+        rel_l2_cols = [col for col in h2h_df.columns if col.endswith('_rel_l2')]
+        if len(rel_l2_cols) >= 2:
+            fig, axes = plt.subplots(1, min(2, len(rel_l2_cols)-1), figsize=(15, 6))
+            if len(rel_l2_cols) == 2:
+                axes = [axes]
+
+            # Pairwise comparisons
+            comparisons_made = 0
+            for i in range(len(rel_l2_cols)):
+                for j in range(i+1, len(rel_l2_cols)):
+                    if comparisons_made >= 2:  # Limit to 2 comparison plots
+                        break
+
+                    repr1 = rel_l2_cols[i].replace('_rel_l2', '')
+                    repr2 = rel_l2_cols[j].replace('_rel_l2', '')
+
+                    # Get matched data points
+                    mask = h2h_df[rel_l2_cols[i]].notna() & h2h_df[rel_l2_cols[j]].notna()
+                    x_data = h2h_df.loc[mask, rel_l2_cols[i]]
+                    y_data = h2h_df.loc[mask, rel_l2_cols[j]]
+
+                    if len(x_data) > 0:
+                        ax = axes[comparisons_made] if len(axes) > 1 else axes[0]
+                        ax.scatter(x_data, y_data, alpha=0.7, s=60)
+
+                        # Add diagonal line for equal performance
+                        min_val = min(x_data.min(), y_data.min())
+                        max_val = max(x_data.max(), y_data.max())
+                        ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.5)
+
+                        ax.set_xlabel(f'{repr1} Rel L2 Error')
+                        ax.set_ylabel(f'{repr2} Rel L2 Error')
+                        ax.set_xscale('log')
+                        ax.set_yscale('log')
+                        ax.set_title(f'{repr1} vs {repr2} Head-to-Head')
+                        ax.grid(True, alpha=0.3)
+
+                        # Count wins
+                        wins_repr1 = (x_data < y_data).sum()
+                        wins_repr2 = (y_data < x_data).sum()
+                        ties = (x_data == y_data).sum()
+
+                        ax.text(0.05, 0.95, f'{repr1}: {wins_repr1} wins\n{repr2}: {wins_repr2} wins\nTies: {ties}',
+                               transform=ax.transAxes, bbox=dict(boxstyle='round', facecolor='white', alpha=0.8),
+                               verticalalignment='top', fontsize=10)
+
+                        comparisons_made += 1
+
+            plt.tight_layout()
+            if output_dir:
+                plt.savefig(output_path / 'head_to_head_comparison.png', dpi=300, bbox_inches='tight')
+            plt.show()
+
+        # Print numerical comparison
+        print("\nNumerical Head-to-Head Results:")
+        print(h2h_df.to_string(index=False))
+
+        # Determine overall winner
+        print("\n=== OVERALL COMPARISON SUMMARY ===")
+        for repr_type in representations:
+            subset = df[df['rational_representation'] == repr_type]
+            print(f"\n{repr_type.upper()}:")
+            print(f"  Experiments: {len(subset)}")
+            print(f"  Best rel L2: {subset['final_rel_l2'].min():.6e}")
+            print(f"  Median rel L2: {subset['final_rel_l2'].median():.6e}")
+            print(f"  Mean rel L2: {subset['final_rel_l2'].mean():.6e}")
+            if 'param_count' in subset.columns:
+                print(f"  Typical params: {subset['param_count'].median():.0f}")
+    else:
+        print("No common configurations found for direct head-to-head comparison")
+
+    # 4. Training curves comparison (if available)
+    plot_representation_training_curves(df, representations, output_dir)
+
+
+def plot_representation_training_curves(df: pd.DataFrame, representations: List[str], output_dir: str = None):
+    """Plot training curves comparison between representations."""
+    # This would require loading the full training curves data
+    # For now, we'll create a placeholder that shows the concept
+    print("\n=== TRAINING CURVES COMPARISON ===")
+    print("Training curves comparison would show convergence patterns for each representation")
+    print("This requires the full iteration_history data from the JSON files")
+
+    # TODO: Implement training curves comparison when data is available
+    # This would involve:
+    # 1. Loading training curves data from the original JSON files
+    # 2. Plotting convergence curves for each representation
+    # 3. Comparing convergence rates and final performance
+
 
 def print_summary(df: pd.DataFrame):
     """Print summary statistics for barycentric attention results."""
