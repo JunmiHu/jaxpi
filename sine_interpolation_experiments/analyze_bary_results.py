@@ -52,6 +52,7 @@ def load_results(results_dir: str) -> pd.DataFrame:
                 'learn_nodes': config.get('learn_nodes', False),
                 'learn_query': config.get('learn_query', False),
                 'query_hdim': config.get('query_hdim', None),
+                'mlp_hdim': config.get('mlp_hdim', None),
                 'mlp_width': config.get('mlp_width', None),
                 'mlp_depth': config.get('mlp_depth', None),
                 'lr': config.get('lr', None),
@@ -291,23 +292,29 @@ def get_unique_mlp_configs(df: pd.DataFrame) -> List[tuple]:
     # Determine which columns define MLP configuration
     mlp_columns = []
 
-    # Primary MLP configuration columns
-    primary_columns = ['mlp_width', 'mlp_depth']
+    # Primary MLP configuration columns (in order of preference)
+    column_options = [
+        ['mlp_hdim'],  # Your actual data format
+        ['mlp_width', 'mlp_depth'],  # Mock data format
+        ['width', 'depth'],  # Fallback
+        ['hidden_dim'],  # Single dimension fallback
+    ]
 
-    for col in primary_columns:
-        if col in df.columns and df[col].notna().any():
-            mlp_columns.append(col)
-
-    # Fallback to other potential columns if primary not found
-    if not mlp_columns:
-        fallback_columns = ['width', 'depth', 'hidden_dim', 'num_layers']
-        for col in fallback_columns:
+    for column_set in column_options:
+        valid_columns = []
+        for col in column_set:
             if col in df.columns and df[col].notna().any():
-                mlp_columns.append(col)
+                valid_columns.append(col)
+
+        if len(valid_columns) == len(column_set):
+            mlp_columns = valid_columns
+            break
 
     if not mlp_columns:
         # If no MLP columns found, treat all as same configuration
         return [('no_mlp_info',)]
+
+    print(f"Using MLP configuration columns: {mlp_columns}")
 
     # Get unique combinations, filtering out None values
     df_filtered = df[mlp_columns].dropna()
@@ -327,17 +334,23 @@ def filter_by_mlp_config(df: pd.DataFrame, config: tuple) -> pd.DataFrame:
 
     # Use the same logic as get_unique_mlp_configs to determine columns
     mlp_columns = []
-    primary_columns = ['mlp_width', 'mlp_depth']
 
-    for col in primary_columns:
-        if col in df.columns and df[col].notna().any():
-            mlp_columns.append(col)
+    column_options = [
+        ['mlp_hdim'],
+        ['mlp_width', 'mlp_depth'],
+        ['width', 'depth'],
+        ['hidden_dim'],
+    ]
 
-    if not mlp_columns:
-        fallback_columns = ['width', 'depth', 'hidden_dim', 'num_layers']
-        for col in fallback_columns:
+    for column_set in column_options:
+        valid_columns = []
+        for col in column_set:
             if col in df.columns and df[col].notna().any():
-                mlp_columns.append(col)
+                valid_columns.append(col)
+
+        if len(valid_columns) == len(column_set):
+            mlp_columns = valid_columns
+            break
 
     if not mlp_columns:
         return df
@@ -356,6 +369,14 @@ def format_mlp_config_name(config: tuple) -> str:
     if config == ('no_mlp_info',):
         return 'unknown_mlp_config'
 
+    # For single dimension case (mlp_hdim)
+    if len(config) == 1:
+        hdim = config[0]
+        if hdim == 0:
+            return "no_mlp"
+        else:
+            return f"mlp_hdim{int(hdim)}"
+
     # For the typical case of (width, depth)
     if len(config) == 2:
         width, depth = config
@@ -365,9 +386,7 @@ def format_mlp_config_name(config: tuple) -> str:
     name_parts = []
     for i, value in enumerate(config):
         if i == 0:
-            name_parts.append(f"w{int(value)}")
-        elif i == 1:
-            name_parts.append(f"d{int(value)}")
+            name_parts.append(f"p{i}_{int(value)}")
         else:
             name_parts.append(f"p{i}_{int(value)}")
 
