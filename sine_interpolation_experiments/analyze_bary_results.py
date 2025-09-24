@@ -52,6 +52,8 @@ def load_results(results_dir: str) -> pd.DataFrame:
                 'learn_nodes': config.get('learn_nodes', False),
                 'learn_query': config.get('learn_query', False),
                 'query_hdim': config.get('query_hdim', None),
+                'mlp_width': config.get('mlp_width', None),
+                'mlp_depth': config.get('mlp_depth', None),
                 'lr': config.get('lr', None),
                 'c1': config.get('c1', None),
                 'c2': config.get('c2', None),
@@ -252,6 +254,132 @@ def plot_results(df: pd.DataFrame, output_dir: str = None):
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
+    # Check if we should separate by MLP configuration
+    mlp_configs = get_unique_mlp_configs(df)
+
+    if len(mlp_configs) > 1:
+        print(f"\nFound {len(mlp_configs)} unique MLP configurations:")
+        for i, config in enumerate(mlp_configs):
+            print(f"  {i+1}. {config}")
+
+        print(f"\nCreating separate analysis for each MLP configuration...")
+
+        # Create separate analysis for each MLP configuration
+        for config in mlp_configs:
+            config_df = filter_by_mlp_config(df, config)
+            config_name = format_mlp_config_name(config)
+
+            print(f"\n{'='*50}")
+            print(f"ANALYZING MLP CONFIG: {config_name}")
+            print(f"{'='*50}")
+            print(f"Experiments: {len(config_df)}")
+
+            # Create subfolder for this configuration
+            config_output_dir = output_path / config_name if output_dir else None
+
+            # Run analysis for this specific configuration
+            plot_results_single_config(config_df, config_output_dir, config_name)
+
+        return
+    else:
+        print(f"Single MLP configuration found: {mlp_configs[0] if mlp_configs else 'Unknown'}")
+        plot_results_single_config(df, output_dir)
+
+
+def get_unique_mlp_configs(df: pd.DataFrame) -> List[tuple]:
+    """Get unique MLP configurations from the dataframe."""
+    # Determine which columns define MLP configuration
+    mlp_columns = []
+
+    # Primary MLP configuration columns
+    primary_columns = ['mlp_width', 'mlp_depth']
+
+    for col in primary_columns:
+        if col in df.columns and df[col].notna().any():
+            mlp_columns.append(col)
+
+    # Fallback to other potential columns if primary not found
+    if not mlp_columns:
+        fallback_columns = ['width', 'depth', 'hidden_dim', 'num_layers']
+        for col in fallback_columns:
+            if col in df.columns and df[col].notna().any():
+                mlp_columns.append(col)
+
+    if not mlp_columns:
+        # If no MLP columns found, treat all as same configuration
+        return [('no_mlp_info',)]
+
+    # Get unique combinations, filtering out None values
+    df_filtered = df[mlp_columns].dropna()
+    if len(df_filtered) == 0:
+        return [('no_mlp_info',)]
+
+    unique_configs = df_filtered.drop_duplicates().values.tolist()
+
+    # Convert to tuples for hashability
+    return [tuple(config) for config in unique_configs]
+
+
+def filter_by_mlp_config(df: pd.DataFrame, config: tuple) -> pd.DataFrame:
+    """Filter dataframe by specific MLP configuration."""
+    if config == ('no_mlp_info',):
+        return df
+
+    # Use the same logic as get_unique_mlp_configs to determine columns
+    mlp_columns = []
+    primary_columns = ['mlp_width', 'mlp_depth']
+
+    for col in primary_columns:
+        if col in df.columns and df[col].notna().any():
+            mlp_columns.append(col)
+
+    if not mlp_columns:
+        fallback_columns = ['width', 'depth', 'hidden_dim', 'num_layers']
+        for col in fallback_columns:
+            if col in df.columns and df[col].notna().any():
+                mlp_columns.append(col)
+
+    if not mlp_columns:
+        return df
+
+    # Create filter condition
+    filter_condition = True
+    for i, col in enumerate(mlp_columns):
+        if i < len(config):
+            filter_condition = filter_condition & (df[col] == config[i])
+
+    return df[filter_condition]
+
+
+def format_mlp_config_name(config: tuple) -> str:
+    """Format MLP configuration tuple into a readable folder name."""
+    if config == ('no_mlp_info',):
+        return 'unknown_mlp_config'
+
+    # For the typical case of (width, depth)
+    if len(config) == 2:
+        width, depth = config
+        return f"mlp_w{int(width)}_d{int(depth)}"
+
+    # Fallback for other cases
+    name_parts = []
+    for i, value in enumerate(config):
+        if i == 0:
+            name_parts.append(f"w{int(value)}")
+        elif i == 1:
+            name_parts.append(f"d{int(value)}")
+        else:
+            name_parts.append(f"p{i}_{int(value)}")
+
+    return "_".join(name_parts)
+
+
+def plot_results_single_config(df: pd.DataFrame, output_dir: str = None, config_name: str = None):
+    """Create plots for a single MLP configuration."""
+    if output_dir:
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+
     # Set style
     plt.style.use('default')
     sns.set_palette("husl")
@@ -275,7 +403,10 @@ def plot_results(df: pd.DataFrame, output_dir: str = None):
         ax = axes[i] if len(axes) > 1 else axes[0]
         sns.heatmap(pivot, annot=True, fmt='.2e', cmap='viridis_r',
                    ax=ax, cbar_kws={'label': 'Median Rel L2 Error'})
-        ax.set_title(f'Median Rel L2 Error (k={k})')
+        title = f'Median Rel L2 Error (k={k})'
+        if config_name:
+            title += f' - {config_name}'
+        ax.set_title(title)
         ax.set_xlabel('N (Number of Nodes)')
         ax.set_ylabel('Rational Representation')
 
@@ -296,7 +427,10 @@ def plot_results(df: pd.DataFrame, output_dir: str = None):
     axes[0, 0].set_xlabel('N (Number of Nodes)')
     axes[0, 0].set_ylabel('Final Rel L2 Error')
     axes[0, 0].set_yscale('log')
-    axes[0, 0].set_title('Effect of N by Rational Representation')
+    title = 'Effect of N by Rational Representation'
+    if config_name:
+        title += f' - {config_name}'
+    axes[0, 0].set_title(title)
     axes[0, 0].legend()
     axes[0, 0].grid(True, alpha=0.3)
 
@@ -535,25 +669,18 @@ def plot_results(df: pd.DataFrame, output_dir: str = None):
     plt.show()
 
     # 7. Rational representation comparison plots
-    plot_representation_comparisons(df, output_dir)
+    plot_representation_comparisons(df, output_dir, config_name)
 
 
-def plot_representation_comparisons(df: pd.DataFrame, output_dir: str = None):
+def plot_representation_comparisons(df: pd.DataFrame, output_dir: str = None, config_name: str = None):
     """Create comparison plots between different rational representations."""
     if output_dir:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-    # Filter for no-MLP cases (MLP width = 0) if that column exists
-    if 'mlp_width' in df.columns:
-        no_mlp_df = df[df['mlp_width'] == 0]
-        if len(no_mlp_df) > 0:
-            print(f"Filtering for no-MLP cases: {len(no_mlp_df)} experiments (MLP width = 0)")
-            df = no_mlp_df
-        else:
-            print("No experiments found with MLP width = 0")
-    else:
-        print("Note: MLP width column not found - analyzing all experiments")
+    # Note: No longer filter by MLP width here since we're already analyzing by MLP config
+    if config_name:
+        print(f"\n=== REPRESENTATION COMPARISON FOR {config_name.upper()} ===")
 
     # Check if we have multiple representations to compare
     representations = df['rational_representation'].unique()
@@ -568,7 +695,7 @@ def plot_representation_comparisons(df: pd.DataFrame, output_dir: str = None):
     if 'linear' in representations and 'standard' in representations:
         print("Found both linear and standard representations - focusing comparison on these two")
         df_focused = df[df['rational_representation'].isin(['linear', 'standard'])]
-        plot_linear_vs_standard_comparison(df_focused, output_dir)
+        plot_linear_vs_standard_comparison(df_focused, output_dir, config_name)
         return
 
     # Set style for comparison plots
@@ -773,13 +900,14 @@ def plot_representation_comparisons(df: pd.DataFrame, output_dir: str = None):
     plot_representation_training_curves(df, representations, output_dir)
 
 
-def plot_linear_vs_standard_comparison(df: pd.DataFrame, output_dir: str = None):
-    """Specialized comparison plots for linear vs standard representations (no MLPs)."""
+def plot_linear_vs_standard_comparison(df: pd.DataFrame, output_dir: str = None, config_name: str = None):
+    """Specialized comparison plots for linear vs standard representations."""
     if output_dir:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-    print("\n=== LINEAR vs STANDARD COMPARISON (No MLPs) ===")
+    config_title = f" ({config_name})" if config_name else ""
+    print(f"\n=== LINEAR vs STANDARD COMPARISON{config_title} ===")
 
     # Separate the data
     linear_df = df[df['rational_representation'] == 'linear']
@@ -800,7 +928,10 @@ def plot_linear_vs_standard_comparison(df: pd.DataFrame, output_dir: str = None)
     axes[0, 0].set_xlabel('N (Number of Nodes)')
     axes[0, 0].set_ylabel('Median Final Rel L2 Error')
     axes[0, 0].set_yscale('log')
-    axes[0, 0].set_title('Performance by N Value')
+    title = 'Performance by N Value'
+    if config_name:
+        title += f' - {config_name}'
+    axes[0, 0].set_title(title)
     axes[0, 0].legend()
     axes[0, 0].grid(True, alpha=0.3)
 
@@ -1033,6 +1164,26 @@ def main():
 
     # Print summary
     print_summary(df)
+
+    # Check for multiple MLP configurations even if not plotting
+    mlp_configs = get_unique_mlp_configs(df)
+    if len(mlp_configs) > 1:
+        print(f"\nFound {len(mlp_configs)} unique MLP configurations:")
+        for i, config in enumerate(mlp_configs):
+            print(f"  {i+1}. {config}")
+
+        if not args.no_plots:
+            print(f"\nGenerating separate plots for each MLP configuration...")
+
+        # Print summaries for each configuration
+        for config in mlp_configs:
+            config_df = filter_by_mlp_config(df, config)
+            config_name = format_mlp_config_name(config)
+
+            print(f"\n{'='*50}")
+            print(f"SUMMARY FOR MLP CONFIG: {config_name}")
+            print(f"{'='*50}")
+            print_summary(config_df)
 
     # Generate plots
     if not args.no_plots:
