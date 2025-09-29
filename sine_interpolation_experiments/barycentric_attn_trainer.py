@@ -9,7 +9,7 @@ import optax
 from tqdm import tqdm
 from typing import Dict, List, Any, Optional
 import json
-from problem_utils import DTYPE, generate_data, loss_fn, rel_l2_error, make_fg_oracle
+from problem_utils import DTYPE, generate_data, loss_fn, rel_l2_error, make_fg_oracle, f_sin
 from jaxpi.ssbroyden_optax import scale_by_ssbroyden_wolfe_oracle
 
 
@@ -380,11 +380,6 @@ class BarycentricAttention(nnx.Module):
         else:
             # Original constant values behavior
             return lam @ self.V.value  # (B,M) @ (M,D) -> (B,D)
-
-
-def f_sin(x: jnp.ndarray, k: int) -> jnp.ndarray:
-    """Target function sin(2πkx)."""
-    return jnp.sin(2.0 * DTYPE(k) * jnp.pi * x)
 
 
 def create_barycentric_attention(
